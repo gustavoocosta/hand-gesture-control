@@ -13,10 +13,14 @@ MODEL_PATH = (
 )
 
 
+
+
+import math
+
+
 def fingers_up(hand):
-    """Retorna se cada dedo está estendido."""
-    # Para os dedos, a ponta costuma ficar acima da articulação
-    # quando a mão está posicionada com os dedos para cima.
+    """Identifica a extensão dos dedos usando os pontos da mão."""
+
     tips = [8, 12, 16, 20]
     joints = [6, 10, 14, 18]
 
@@ -25,15 +29,38 @@ def fingers_up(hand):
         for tip, joint in zip(tips, joints)
     ]
 
-    # Avaliação inicial do polegar usando coordenadas horizontais.
-    # Funciona melhor com a palma voltada para a câmera.
-    thumb_up = hand[4].x < hand[3].x
+    # Usa a distância entre os pontos do polegar,
+    # em vez de depender somente da coordenada X.
+    def distance(a, b):
+        return math.hypot(
+            hand[a].x - hand[b].x,
+            hand[a].y - hand[b].y,
+        )
 
-    return [thumb_up] + fingers
+    thumb_extended = (
+        distance(4, 2) > distance(3, 2) * 1.2
+    )
+
+    return [thumb_extended] + fingers
+
+
 
 
 def recognize_gesture(hand):
     thumb, index, middle, ring, pinky = fingers_up(hand)
+
+    # Polegar apontando para cima e demais dedos dobrados.
+    thumb_pointing_up = (
+        hand[4].y < hand[3].y
+        and hand[3].y < hand[2].y
+    )
+
+    other_fingers_folded = not any(
+        [index, middle, ring, pinky]
+    )
+
+    if thumb and other_fingers_folded and thumb_pointing_up:
+        return "Polegar para cima"
 
     if all([thumb, index, middle, ring, pinky]):
         return "Mao aberta"
@@ -44,10 +71,8 @@ def recognize_gesture(hand):
     if index and middle and not ring and not pinky:
         return "Sinal de paz"
 
-    if thumb and not index and not middle and not ring and not pinky:
-        return "Polegar para cima"
-
     return "Gesto nao identificado"
+
 
 
 def draw_hand(frame, landmarks):
