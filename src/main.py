@@ -104,6 +104,7 @@ def main():
         return
 
     screen_width, screen_height = pyautogui.size()
+
     previous_x = screen_width / 2
     previous_y = screen_height / 2
 
@@ -131,8 +132,8 @@ def main():
 
     print("Controle do mouse iniciado.")
     print("Mova o indicador para controlar o cursor.")
-    print("Junte e segure a pinca brevemente; solte para clicar.")
-    print("Mao aberta: teste visual de configuracao da mao.")
+    print("Junte e segure a pinca; solte para clicar.")
+    print("Numeros de 1 a 5: reconhecimento experimental.")
     print("Pressione Q na janela da webcam para sair.")
     print("CUIDADO: o canto superior esquerdo ativa o failsafe.")
 
@@ -167,9 +168,10 @@ def main():
                 if result.hand_landmarks:
                     hand = result.hand_landmarks[0]
                     draw_hand(frame, hand)
-                    movimento = reconhecedor.atualizar(hand)
 
-                    # Reconhecimento experimental de configuracao da mao
+                    configuracao, movimento = (
+                        reconhecedor.atualizar(hand)
+                    )
 
                     index_tip = hand[8]
                     thumb_tip = hand[4]
@@ -200,30 +202,38 @@ def main():
                     previous_x = current_x
                     previous_y = current_y
 
+                    # Detecta o inicio, a manutencao e a soltura
+                    # da pinca, evitando cliques repetidos.
                     now = time.monotonic()
-                    pinch_distance = distance(thumb_tip, index_tip)
+                    pinch_distance = distance(
+                        thumb_tip,
+                        index_tip,
+                    )
 
-                    if pinching:
+                    if not pinching:
                         is_pinching = (
-                            pinch_distance < PINCH_RELEASE_DISTANCE
+                            pinch_distance < PINCH_START_DISTANCE
                         )
                     else:
                         is_pinching = (
-                            pinch_distance < PINCH_START_DISTANCE
+                            pinch_distance < PINCH_RELEASE_DISTANCE
                         )
 
                     if is_pinching and not pinching:
                         pinch_started_at = now
 
-                    if (
-                        pinching
-                        and not is_pinching
-                        and pinch_started_at is not None
-                        and now - pinch_started_at >= PINCH_HOLD_SECONDS
-                        and now - last_click_time >= CLICK_COOLDOWN
-                    ):
-                        pyautogui.click()
-                        last_click_time = now
+                    elif pinching and not is_pinching:
+                        if (
+                            pinch_started_at is not None
+                            and now - pinch_started_at
+                            >= PINCH_HOLD_SECONDS
+                            and now - last_click_time
+                            >= CLICK_COOLDOWN
+                        ):
+                            pyautogui.click()
+                            last_click_time = now
+
+                        pinch_started_at = None
 
                     pinching = is_pinching
 
@@ -259,16 +269,26 @@ def main():
                         (255, 255, 255),
                         2,
                     )
-                    cv2.putText(
-    frame,
-    f"Movimento: {movimento}",
-    (20, 160),
-    cv2.FONT_HERSHEY_SIMPLEX,
-    0.55,
-    (255, 200, 0),
-    2,
-)
 
+                    cv2.putText(
+                        frame,
+                        f"Numero/Gesto: {configuracao}",
+                        (20, 160),
+                        cv2.FONT_HERSHEY_SIMPLEX,
+                        0.55,
+                        (0, 255, 255),
+                        2,
+                    )
+
+                    cv2.putText(
+                        frame,
+                        f"Movimento: {movimento}",
+                        (20, 195),
+                        cv2.FONT_HERSHEY_SIMPLEX,
+                        0.55,
+                        (255, 200, 0),
+                        2,
+                    )
 
                 else:
                     pinching = False
