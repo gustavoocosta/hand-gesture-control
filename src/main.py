@@ -1,9 +1,11 @@
 
+import math
 import time
 from pathlib import Path
 
 import cv2
 import mediapipe as mp
+import pyautogui
 
 
 MODEL_PATH = (
@@ -12,15 +14,18 @@ MODEL_PATH = (
     / "hand_landmarker.task"
 )
 
+pyautogui.FAILSAFE = True
+pyautogui.PAUSE = 0.01
+
+SMOOTHING = 0.25
+CLICK_DISTANCE = 0.045
 
 
-
-import math
+def distance(a, b):
+    return math.hypot(a.x - b.x, a.y - b.y)
 
 
 def fingers_up(hand):
-    """Identifica a extensão dos dedos usando os pontos da mão."""
-
     tips = [8, 12, 16, 20]
     joints = [6, 10, 14, 18]
 
@@ -29,37 +34,26 @@ def fingers_up(hand):
         for tip, joint in zip(tips, joints)
     ]
 
-    # Usa a distância entre os pontos do polegar,
-    # em vez de depender somente da coordenada X.
-    def distance(a, b):
-        return math.hypot(
-            hand[a].x - hand[b].x,
-            hand[a].y - hand[b].y,
-        )
-
     thumb_extended = (
-        distance(4, 2) > distance(3, 2) * 1.2
+        distance(hand[4], hand[2])
+        > distance(hand[3], hand[2]) * 1.2
     )
 
     return [thumb_extended] + fingers
 
 
-
-
 def recognize_gesture(hand):
     thumb, index, middle, ring, pinky = fingers_up(hand)
 
-    # Polegar apontando para cima e demais dedos dobrados.
     thumb_pointing_up = (
-        hand[4].y < hand[3].y
-        and hand[3].y < hand[2].y
+        hand[4].y < hand[3].y < hand[2].y
     )
 
-    other_fingers_folded = not any(
-        [index, middle, ring, pinky]
-    )
-
-    if thumb and other_fingers_folded and thumb_pointing_up:
+    if (
+        thumb
+        and not any([index, middle, ring, pinky])
+        and thumb_pointing_up
+    ):
         return "Polegar para cima"
 
     if all([thumb, index, middle, ring, pinky]):
@@ -74,23 +68,23 @@ def recognize_gesture(hand):
     return "Gesto nao identificado"
 
 
-
 def draw_hand(frame, landmarks):
     height, width, _ = frame.shape
+
     points = [
         (int(point.x * width), int(point.y * height))
         for point in landmarks
     ]
 
-    connections = mp.tasks.vision.HandLandmarksConnections.HAND_CONNECTIONS
+    connections = (
+        mp.tasks.vision.HandLandmarksConnections.HAND_CONNECTIONS
+    )
 
     for connection in connections:
-        start = connection.start
-        end = connection.end
         cv2.line(
             frame,
-            points[start],
-            points[end],
+            points[connection.start],
+            points[connection.end],
             (0, 255, 0),
             2,
         )
@@ -104,30 +98,37 @@ def main():
         print(f"Modelo nao encontrado: {MODEL_PATH}")
         return
 
-    BaseOptions = mp.tasks.BaseOptions
-    HandLandmarker = mp.tasks.vision.HandLandmarker
-    HandLandmarkerOptions = mp.tasks.vision.HandLandmarkerOptions
-    RunningMode = mp.tasks.vision.RunningMode
+    screen_width, screen_height = pyautogui.size()
+    previous_x = screen_width / 2
+    previous_y = screen_height / 2
+    pinching = False
 
-    options = HandLandmarkerOptions(
-        base_options=BaseOptions(
+    options = mp.tasks.vision.HandLandmarkerOptions(
+        base_options=mp.tasks.BaseOptions(
             model_asset_path=str(MODEL_PATH)
         ),
-        running_mode=RunningMode.VIDEO,
-        num_hands=2,
+        running_mode=mp.tasks.vision.RunningMode.VIDEO,
+        num_hands=1,
     )
 
-    camera = cv2.VideoCapture(0)
+    camera = cv2.VideoCapture(0, cv2.CAP_DSHOW)
 
     if not camera.isOpened():
         print("Erro: nao foi possivel abrir a webcam.")
         return
 
     start_time = time.monotonic()
-    print("Reconhecimento de gestos iniciado. Pressione Q para sair.")
+
+    print("Controle do mouse iniciado.")
+    print("Mova o indicador para controlar o cursor.")
+    print("Junte e separe polegar e indicador para clicar.")
+    print("Pressione Q na janela da webcam para sair.")
+    print("CUIDADO: mover o mouse para o canto superior esquerdo ativa o failsafe.")
 
     try:
-        with HandLandmarker.create_from_options(options) as landmarker:
+        with mp.tasks.vision.HandLandmarker.create_from_options(
+            options
+        ) as landmarker:
             while True:
                 success, frame = camera.read()
 
@@ -147,29 +148,94 @@ def main():
                     (time.monotonic() - start_time) * 1000
                 )
 
-                result = landmarker.detect_for_video(image, timestamp)
+                result = landmarker.detect_for_video(
+                    image,
+                    timestamp,
+                )
 
                 if result.hand_landmarks:
-                    for hand in result.hand_landmarks:
-                        draw_hand(frame, hand)
-                        gesture = recognize_gesture(hand)
+                    hand = result.hand_landmarks[0]
+                    draw_hand(frame, hand)
 
+                    index_tip = hand[8]
+                    thumb_tip = hand[4]
+
+                    target_x = (
+                        max(0, min(1, 1 - index_tip.x))
+                        * screen_width
+                    )
+                    target_y = (
+                        max(0, min(1, index_tip.y))
+                        * screen_height
+                    )
+
+                    current_x = (
+                        previous_x
+                        + (target_x - previous_x) * SMOOTHING
+                    )
+                    current_y = (
+                        previous_y
+                        + (target_y - previous_y) * SMOOTHING
+                    )
+
+                    pyautogui.moveTo(
+                        int(current_x),
+                        int(current_y),
+                    )
+
+                    previous_x = current_x
+                    previous_y = current_y
+
+                    pinch_distance = distance(
+                        thumb_tip,
+                        index_tip,
+                    )
+                    is_pinching = pinch_distance < CLICK_DISTANCE
+
+                    if is_pinching and not pinching:
                         cv2.putText(
                             frame,
-                            gesture,
-                            (20, 80),
+                            "Pinça detectada",
+                            (20, 120),
                             cv2.FONT_HERSHEY_SIMPLEX,
-                            1,
-                            (0, 255, 0),
+                            0.8,
+                            (0, 255, 255),
                             2,
                         )
+
+                    if pinching and not is_pinching:
+                        pyautogui.click()
+
+                    pinching = is_pinching
+
+                    gesture = recognize_gesture(hand)
+
+                    cv2.putText(
+                        frame,
+                        f"Gesto: {gesture}",
+                        (20, 40),
+                        cv2.FONT_HERSHEY_SIMPLEX,
+                        0.7,
+                        (0, 255, 0),
+                        2,
+                    )
+                    cv2.putText(
+                        frame,
+                        "Indicador: mover | Pinca: clicar",
+                        (20, 75),
+                        cv2.FONT_HERSHEY_SIMPLEX,
+                        0.55,
+                        (255, 255, 255),
+                        2,
+                    )
                 else:
+                    pinching = False
                     cv2.putText(
                         frame,
                         "Nenhuma mao detectada",
-                        (20, 80),
+                        (20, 40),
                         cv2.FONT_HERSHEY_SIMPLEX,
-                        0.8,
+                        0.7,
                         (0, 0, 255),
                         2,
                     )
