@@ -17,8 +17,11 @@ MODEL_PATH = (
 pyautogui.FAILSAFE = True
 pyautogui.PAUSE = 0.01
 
-SMOOTHING = 0.25
-CLICK_DISTANCE = 0.045
+SMOOTHING = 0.20
+PINCH_START_DISTANCE = 0.035
+PINCH_RELEASE_DISTANCE = 0.055
+PINCH_HOLD_SECONDS = 0.12
+CLICK_COOLDOWN = 0.5
 
 
 def distance(a, b):
@@ -101,7 +104,10 @@ def main():
     screen_width, screen_height = pyautogui.size()
     previous_x = screen_width / 2
     previous_y = screen_height / 2
+
     pinching = False
+    pinch_started_at = None
+    last_click_time = 0.0
 
     options = mp.tasks.vision.HandLandmarkerOptions(
         base_options=mp.tasks.BaseOptions(
@@ -121,9 +127,9 @@ def main():
 
     print("Controle do mouse iniciado.")
     print("Mova o indicador para controlar o cursor.")
-    print("Junte e separe polegar e indicador para clicar.")
+    print("Junte e segure a pinça brevemente; solte para clicar.")
     print("Pressione Q na janela da webcam para sair.")
-    print("CUIDADO: mover o mouse para o canto superior esquerdo ativa o failsafe.")
+    print("CUIDADO: o canto superior esquerdo ativa o failsafe.")
 
     try:
         with mp.tasks.vision.HandLandmarker.create_from_options(
@@ -162,11 +168,11 @@ def main():
 
                     target_x = (
                         max(0, min(1, 1 - index_tip.x))
-                        * screen_width
+                        * (screen_width - 1)
                     )
                     target_y = (
                         max(0, min(1, index_tip.y))
-                        * screen_height
+                        * (screen_height - 1)
                     )
 
                     current_x = (
@@ -186,27 +192,43 @@ def main():
                     previous_x = current_x
                     previous_y = current_y
 
-                    pinch_distance = distance(
-                        thumb_tip,
-                        index_tip,
-                    )
-                    is_pinching = pinch_distance < CLICK_DISTANCE
+                    now = time.monotonic()
+                    pinch_distance = distance(thumb_tip, index_tip)
+
+                    if pinching:
+                        is_pinching = (
+                            pinch_distance < PINCH_RELEASE_DISTANCE
+                        )
+                    else:
+                        is_pinching = (
+                            pinch_distance < PINCH_START_DISTANCE
+                        )
 
                     if is_pinching and not pinching:
+                        pinch_started_at = now
+
+                    if (
+                        pinching
+                        and not is_pinching
+                        and pinch_started_at is not None
+                        and now - pinch_started_at >= PINCH_HOLD_SECONDS
+                        and now - last_click_time >= CLICK_COOLDOWN
+                    ):
+                        pyautogui.click()
+                        last_click_time = now
+
+                    pinching = is_pinching
+
+                    if pinching:
                         cv2.putText(
                             frame,
-                            "Pinça detectada",
+                            "Pinca detectada",
                             (20, 120),
                             cv2.FONT_HERSHEY_SIMPLEX,
                             0.8,
                             (0, 255, 255),
                             2,
                         )
-
-                    if pinching and not is_pinching:
-                        pyautogui.click()
-
-                    pinching = is_pinching
 
                     gesture = recognize_gesture(hand)
 
@@ -230,6 +252,8 @@ def main():
                     )
                 else:
                     pinching = False
+                    pinch_started_at = None
+
                     cv2.putText(
                         frame,
                         "Nenhuma mao detectada",
