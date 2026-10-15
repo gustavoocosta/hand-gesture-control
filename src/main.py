@@ -7,6 +7,8 @@ import cv2
 import mediapipe as mp
 import pyautogui
 
+from libras import ReconhecedorLibras
+
 
 MODEL_PATH = (
     Path(__file__).resolve().parent.parent
@@ -109,6 +111,8 @@ def main():
     pinch_started_at = None
     last_click_time = 0.0
 
+    reconhecedor = ReconhecedorLibras()
+
     options = mp.tasks.vision.HandLandmarkerOptions(
         base_options=mp.tasks.BaseOptions(
             model_asset_path=str(MODEL_PATH)
@@ -127,7 +131,8 @@ def main():
 
     print("Controle do mouse iniciado.")
     print("Mova o indicador para controlar o cursor.")
-    print("Junte e segure a pinça brevemente; solte para clicar.")
+    print("Junte e segure a pinca brevemente; solte para clicar.")
+    print("Mao aberta: teste visual de configuracao da mao.")
     print("Pressione Q na janela da webcam para sair.")
     print("CUIDADO: o canto superior esquerdo ativa o failsafe.")
 
@@ -162,6 +167,9 @@ def main():
                 if result.hand_landmarks:
                     hand = result.hand_landmarks[0]
                     draw_hand(frame, hand)
+                    movimento = reconhecedor.atualizar(hand)
+
+                    # Reconhecimento experimental de configuracao da mao
 
                     index_tip = hand[8]
                     thumb_tip = hand[4]
@@ -241,6 +249,7 @@ def main():
                         (0, 255, 0),
                         2,
                     )
+
                     cv2.putText(
                         frame,
                         "Indicador: mover | Pinca: clicar",
@@ -250,6 +259,17 @@ def main():
                         (255, 255, 255),
                         2,
                     )
+                    cv2.putText(
+    frame,
+    f"Movimento: {movimento}",
+    (20, 160),
+    cv2.FONT_HERSHEY_SIMPLEX,
+    0.55,
+    (255, 200, 0),
+    2,
+)
+
+
                 else:
                     pinching = False
                     pinch_started_at = None
