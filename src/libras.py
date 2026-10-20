@@ -1,5 +1,5 @@
 
-from collections import deque
+from collections import deque, Counter
 import time
 import math
 
@@ -8,30 +8,37 @@ class ReconhecedorLibras:
     def __init__(self, duracao_historico=1.5):
         self.historico = deque()
         self.duracao_historico = duracao_historico
+        self.historico_configuracoes = deque(maxlen=7)
 
     @staticmethod
     def distancia(a, b):
         return math.hypot(a.x - b.x, a.y - b.y)
 
     def dedos_estendidos(self, hand):
-        # Indicador, médio, anelar e mínimo
+        """
+        Estima quais dedos estao estendidos usando a
+        posicao das pontas em relacao as articulacoes.
+        Pressupoe a palma aproximadamente voltada para a camera.
+        """
         pontas = [8, 12, 16, 20]
         articulacoes = [6, 10, 14, 18]
 
-        dedos = [
-            hand[ponta].y < hand[articulacao].y
-            for ponta, articulacao in zip(pontas, articulacoes)
-        ]
+        dedos = []
 
-        # Estimativa simples para o polegar
+        for ponta, articulacao in zip(pontas, articulacoes):
+            dedos.append(
+                hand[ponta].y < hand[articulacao].y
+            )
+
+        # Compara a distancia do polegar em relacao a palma.
+        # Funciona melhor com a palma voltada para a camera.
         polegar = (
             self.distancia(hand[4], hand[5])
-            > self.distancia(hand[3], hand[5])
+            > self.distancia(hand[3], hand[5]) * 1.1
         )
 
         return [polegar] + dedos
 
-   
     def reconhecer_configuracao(self, hand):
         polegar, indicador, medio, anelar, minimo = (
             self.dedos_estendidos(hand)
@@ -77,11 +84,21 @@ class ReconhecedorLibras:
         ):
             self.historico.popleft()
 
-        configuracao = self.reconhecer_configuracao(hand)
+        configuracao_atual = self.reconhecer_configuracao(hand)
+        self.historico_configuracoes.append(configuracao_atual)
+
+        contagem = Counter(self.historico_configuracoes)
+        configuracao, quantidade = contagem.most_common(1)[0]
+
+        if (
+            quantidade < 4
+            or configuracao == "Configuracao nao identificada"
+        ):
+            configuracao = "Estabilizando reconhecimento..."
+
         movimento = self.analisar_movimento(hand)
 
         return configuracao, movimento
-
     def analisar_movimento(self, hand):
         if len(self.historico) < 5:
             return "Coletando movimento..."

@@ -20,10 +20,13 @@ pyautogui.FAILSAFE = True
 pyautogui.PAUSE = 0.01
 
 SMOOTHING = 0.20
+
+# Configuracoes da pinca
 PINCH_START_DISTANCE = 0.035
 PINCH_RELEASE_DISTANCE = 0.055
 PINCH_HOLD_SECONDS = 0.12
 CLICK_COOLDOWN = 0.5
+PINCH_RELEASE_FRAMES = 3
 
 
 def distance(a, b):
@@ -51,7 +54,8 @@ def recognize_gesture(hand):
     thumb, index, middle, ring, pinky = fingers_up(hand)
 
     thumb_pointing_up = (
-        hand[4].y < hand[3].y < hand[2].y
+        hand[4].y < hand[3].y
+        and hand[3].y < hand[2].y
     )
 
     if (
@@ -111,6 +115,7 @@ def main():
     pinching = False
     pinch_started_at = None
     last_click_time = 0.0
+    pinch_release_frames = 0
 
     reconhecedor = ReconhecedorLibras()
 
@@ -122,7 +127,23 @@ def main():
         num_hands=1,
     )
 
-    camera = cv2.VideoCapture(0, cv2.CAP_DSHOW)
+    camera = cv2.VideoCapture(1, cv2.CAP_DSHOW)
+
+    if not camera.isOpened():
+        camera.release()
+        camera = cv2.VideoCapture(0, cv2.CAP_DSHOW)
+
+    camera.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
+    camera.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
+    camera.set(cv2.CAP_PROP_FPS, 30)
+    camera.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+
+    print(
+        "Resolucao da webcam:",
+        int(camera.get(cv2.CAP_PROP_FRAME_WIDTH)),
+        "x",
+        int(camera.get(cv2.CAP_PROP_FRAME_HEIGHT)),
+    )
 
     if not camera.isOpened():
         print("Erro: nao foi possivel abrir a webcam.")
@@ -133,7 +154,7 @@ def main():
     print("Controle do mouse iniciado.")
     print("Mova o indicador para controlar o cursor.")
     print("Junte e segure a pinca; solte para clicar.")
-    print("Numeros de 1 a 5: reconhecimento experimental.")
+    print("Numeros de 0 a 5: reconhecimento experimental.")
     print("Pressione Q na janela da webcam para sair.")
     print("CUIDADO: o canto superior esquerdo ativa o failsafe.")
 
@@ -202,8 +223,7 @@ def main():
                     previous_x = current_x
                     previous_y = current_y
 
-                    # Detecta o inicio, a manutencao e a soltura
-                    # da pinca, evitando cliques repetidos.
+                    # Detecta a aproximacao e a soltura da pinca.
                     now = time.monotonic()
                     pinch_distance = distance(
                         thumb_tip,
@@ -214,28 +234,37 @@ def main():
                         is_pinching = (
                             pinch_distance < PINCH_START_DISTANCE
                         )
+
+                        if is_pinching:
+                            pinch_started_at = now
+                            pinch_release_frames = 0
+                            pinching = True
+
                     else:
-                        is_pinching = (
-                            pinch_distance < PINCH_RELEASE_DISTANCE
-                        )
+                        if pinch_distance >= PINCH_RELEASE_DISTANCE:
+                            pinch_release_frames += 1
+                        else:
+                            pinch_release_frames = 0
 
-                    if is_pinching and not pinching:
-                        pinch_started_at = now
-
-                    elif pinching and not is_pinching:
+                        # Exige tres frames consecutivos para confirmar
+                        # que a pinca foi solta.
                         if (
-                            pinch_started_at is not None
-                            and now - pinch_started_at
-                            >= PINCH_HOLD_SECONDS
-                            and now - last_click_time
-                            >= CLICK_COOLDOWN
+                            pinch_release_frames
+                            >= PINCH_RELEASE_FRAMES
                         ):
-                            pyautogui.click()
-                            last_click_time = now
+                            if (
+                                pinch_started_at is not None
+                                and now - pinch_started_at
+                                >= PINCH_HOLD_SECONDS
+                                and now - last_click_time
+                                >= CLICK_COOLDOWN
+                            ):
+                                pyautogui.click()
+                                last_click_time = now
 
-                        pinch_started_at = None
-
-                    pinching = is_pinching
+                            pinching = False
+                            pinch_started_at = None
+                            pinch_release_frames = 0
 
                     if pinching:
                         cv2.putText(
@@ -293,6 +322,7 @@ def main():
                 else:
                     pinching = False
                     pinch_started_at = None
+                    pinch_release_frames = 0
 
                     cv2.putText(
                         frame,
@@ -304,6 +334,15 @@ def main():
                         2,
                     )
 
+                cv2.namedWindow(
+                    "Hand Gesture Control",
+                    cv2.WINDOW_NORMAL,
+                )
+                cv2.resizeWindow(
+                    "Hand Gesture Control",
+                    1280,
+                    720,
+                )
                 cv2.imshow("Hand Gesture Control", frame)
 
                 if cv2.waitKey(1) & 0xFF == ord("q"):
